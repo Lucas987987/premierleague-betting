@@ -1,0 +1,4 @@
+metric,bayes,freq,market
+log_loss,0.9935,0.9953,0.9610
+brier,0.5931,0.5908,0.5708
+n_evaluated,1136,1136,1136
