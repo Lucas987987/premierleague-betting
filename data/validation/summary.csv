@@ -1,0 +1,4 @@
+metric,model,market,naive
+log_loss,0.9947,0.9610,1.0739
+brier,0.5908,0.5708,0.6502
+n_evaluated,1136,1136,1136
