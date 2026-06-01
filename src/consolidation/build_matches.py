@@ -18,7 +18,7 @@ Décisions (cf. ARCHITECTURE.md + choix V1) :
     d'un coup ; en strict, on lève.
 
 Le but de ce module en V1 : confronter team_mapping.csv aux 5 vraies saisons.
-Il va lister les promus/relégués manquants (Saint-Étienne, Reims, etc.) pour
+Il va lister les promus/relégués manquants (Leeds, Sunderland, etc.) pour
 qu'on complète la table — c'est le garde-fou anti "match perdu" en action.
 """
 
@@ -30,7 +30,7 @@ from pathlib import Path
 
 from common.teams import TeamResolver, UnknownTeamError
 
-LEAGUE_CODE = "F1"
+LEAGUE_CODE = "E0"
 HOME_COL = "HomeTeam"
 AWAY_COL = "AwayTeam"
 SOURCE = "footballdata"
@@ -40,18 +40,16 @@ DEFAULT_RAW_DIR = _ROOT / "data" / "raw" / "footballdata"
 DEFAULT_OUT = _ROOT / "data" / "processed" / "matches.csv"
 DEFAULT_MAPPING = _ROOT / "config" / "team_mapping.csv"
 
-# Colonnes dérivées qu'on ajoute en tête de chaque ligne.
 DERIVED_COLS = ["season", "HomeTeamCanonical", "AwayTeamCanonical"]
 
 
 @dataclass
 class ConsolidationReport:
-    seasons: list[str] = field(default_factory=list)
-    rows_per_season: dict[str, int] = field(default_factory=dict)
+    seasons: list = field(default_factory=list)
+    rows_per_season: dict = field(default_factory=dict)
     total_rows: int = 0
-    # noms bruts non résolus -> nombre d'occurrences
-    unresolved_teams: dict[str, int] = field(default_factory=dict)
-    columns: list[str] = field(default_factory=list)
+    unresolved_teams: dict = field(default_factory=dict)
+    columns: list = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -77,29 +75,21 @@ class ConsolidationReport:
         return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------- #
-# Lecture des captures
-# ---------------------------------------------------------------------- #
 def _season_from_filename(path: Path) -> str:
-    # F1_2425_20260531T171513Z.csv -> '2425'
     return path.name.split("_")[1]
 
 
-def latest_capture_per_season(raw_dir: Path) -> dict[str, Path]:
-    """Pour chaque saison, la capture la plus récente (par nom = ordre temporel)."""
-    by_season: dict[str, list[Path]] = {}
+def latest_capture_per_season(raw_dir: Path) -> dict:
+    by_season = {}
     for p in raw_dir.glob(f"{LEAGUE_CODE}_*.csv"):
         by_season.setdefault(_season_from_filename(p), []).append(p)
     return {season: sorted(paths)[-1] for season, paths in by_season.items()}
 
 
-def _read_rows(path: Path) -> tuple[list[str], list[dict[str, str]]]:
-    """Lit un CSV football-data. Gère le BOM éventuel en tête de fichier."""
+def _read_rows(path: Path):
     with path.open(newline="", encoding="utf-8-sig") as fh:
         reader = csv.DictReader(fh)
         fieldnames = reader.fieldnames or []
-        # football-data laisse parfois des lignes vides en fin de fichier :
-        # on ne garde que les lignes ayant une date et des équipes.
         rows = [
             r for r in reader
             if (r.get("Date") or "").strip() and (r.get(HOME_COL) or "").strip()
@@ -107,22 +97,8 @@ def _read_rows(path: Path) -> tuple[list[str], list[dict[str, str]]]:
     return fieldnames, rows
 
 
-# ---------------------------------------------------------------------- #
-# Consolidation
-# ---------------------------------------------------------------------- #
-def build_matches(
-    raw_dir: Path = DEFAULT_RAW_DIR,
-    out_path: Path = DEFAULT_OUT,
-    mapping_path: Path = DEFAULT_MAPPING,
-    strict: bool = False,
-    write: bool = True,
-) -> ConsolidationReport:
-    """Consolide toutes les saisons en un matches.csv unique.
-
-    strict=False (défaut) : ne lève pas sur un nom inconnu, le signale dans le
-    rapport (canonique laissé vide). Permet de lister TOUS les manquants d'un coup.
-    strict=True : lève UnknownTeamError au premier nom non résolu.
-    """
+def build_matches(raw_dir=DEFAULT_RAW_DIR, out_path=DEFAULT_OUT,
+                  mapping_path=DEFAULT_MAPPING, strict=False, write=True):
     raw_dir = Path(raw_dir)
     resolver = TeamResolver.from_csv(mapping_path)
     captures = latest_capture_per_season(raw_dir)
@@ -131,18 +107,14 @@ def build_matches(
             f"Aucune capture {LEAGUE_CODE}_*.csv dans {raw_dir}. "
             f"Lancer d'abord l'ingestion."
         )
-
     report = ConsolidationReport()
-    all_columns: list[str] = list(DERIVED_COLS)  # ordre : dérivées d'abord
-    consolidated: list[dict[str, str]] = []
-
-    for season in sorted(captures):  # ancien -> récent
+    all_columns = list(DERIVED_COLS)
+    consolidated = []
+    for season in sorted(captures):
         fieldnames, rows = _read_rows(captures[season])
-        # Étendre l'union des colonnes en préservant l'ordre d'apparition.
         for col in fieldnames:
             if col not in all_columns:
                 all_columns.append(col)
-
         for row in rows:
             out_row = dict(row)
             out_row["season"] = season
@@ -156,18 +128,15 @@ def build_matches(
                 except UnknownTeamError:
                     if strict:
                         raise
-                    out_row[canon_col] = ""  # non résolu, signalé dans le rapport
+                    out_row[canon_col] = ""
                     report.unresolved_teams[raw_name] = (
                         report.unresolved_teams.get(raw_name, 0) + 1
                     )
             consolidated.append(out_row)
-
         report.seasons.append(season)
         report.rows_per_season[season] = len(rows)
-
     report.total_rows = len(consolidated)
     report.columns = all_columns
-
     if write:
         out_path = Path(out_path)
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -175,7 +144,6 @@ def build_matches(
             writer = csv.DictWriter(fh, fieldnames=all_columns, extrasaction="ignore")
             writer.writeheader()
             writer.writerows(consolidated)
-
     return report
 
 
@@ -183,8 +151,7 @@ if __name__ == "__main__":  # pragma: no cover
     rep = build_matches(strict=False)
     print(rep.summary())
     if not rep.ok:
-        # Sortie non nulle pour que le workflow signale qu'il faut compléter le mapping.
         raise SystemExit(
             "\nConsolidation incomplète : compléter team_mapping.csv "
             "avec les équipes ci-dessus, puis relancer."
-      )
+        )
