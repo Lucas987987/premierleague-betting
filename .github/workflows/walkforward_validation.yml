@@ -1,0 +1,75 @@
+name: Validation walk-forward (fréquentiste vs marché vs naïve)
+
+# Mesure la performance prédictive du modèle Dixon-Coles fréquentiste sans fuite
+# temporelle (amorçage = 2 premières saisons, puis prédiction date par date en
+# réentraînant sur tout le passé strict). Compare :
+#   - Modèle Dixon-Coles (fréquentiste)
+#   - Marché : cotes de clôture Pinnacle (PSCH/D/A) dévigorisées, repli moyenne
+#   - Baseline naïve : fréquences 1/N/2 de l'amorçage
+#
+# Répond à : le modèle apprend-il (bat-il la naïve) ? et où se situe le marché ?
+# C'est la photo de RÉFÉRENCE avant d'évaluer l'apport du bayésien
+# (walkforward_bayes, workflow séparé).
+#
+# Écrit data/validation/summary.csv + calibration.csv.
+#
+# Aucun secret requis. validation/ est à la RACINE (pas dans src/), d'où le
+# PYTHONPATH=src:. (src pour 'model', '.' pour le package 'validation').
+#
+# Cadence : MANUELLE uniquement. La log-loss historique ne bouge pas d'une
+# semaine à l'autre ; on relance quand le modèle ou les données changent.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: walkforward-validation
+  cancel-in-progress: false
+
+jobs:
+  walkforward:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le repo
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dépendances
+        run: pip install numpy scipy
+
+      - name: Validation walk-forward
+        run: |
+          PYTHONPATH=src:. python -m validation.walkforward > walkforward_report.txt 2>&1
+          cat walkforward_report.txt
+
+      - name: Publier le rapport dans le résumé du run
+        if: always()
+        run: |
+          {
+            echo "## Validation walk-forward (fréquentiste vs marché vs naïve)"
+            echo ""
+            echo '```'
+            cat walkforward_report.txt 2>/dev/null || echo "(pas de rapport — la validation a échoué avant de produire une sortie)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Committer les résultats de validation
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/validation/
+          if git diff --staged --quiet; then
+            echo "Résultats inchangés — rien à committer."
+          else
+            git commit -m "validation: walk-forward $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push
+          fi
+
