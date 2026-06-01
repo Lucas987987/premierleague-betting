@@ -1,0 +1,67 @@
+name: CLV (Closing Line Value)
+
+# Calcule le CLV des paris journalisés : compare la cote du pari (cote précoce,
+# journal) à la clôture Pinnacle (football-data, PSCH/PSCD/PSCA). Le juge de paix
+# du projet : battre la clôture régulièrement prédit la profitabilité.
+#
+# À lancer APRÈS que les matchs sont joués et que football-data a été réingéré
+# (les cotes de clôture arrivent quelques jours après le match). Tourne donc en
+# milieu de semaine, une fois les résultats consolidés.
+#
+# Les paris non encore appariés (match pas joué/ingéré) restent "en attente" :
+# ils seront évalués à un run ultérieur, jamais devinés.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Mardi et mercredi à 8h UTC (après réingestion football-data).
+    - cron: "0 8 * * 2,3"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clv
+  cancel-in-progress: false
+
+jobs:
+  clv:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le repo
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Calculer le CLV
+        run: |
+          PYTHONPATH=src python -m scoring.clv > clv_report.txt 2>&1
+          cat clv_report.txt
+
+      - name: Publier le rapport dans le résumé du run
+        if: always()
+        run: |
+          {
+            echo "## CLV (Closing Line Value)"
+            echo ""
+            echo '```'
+            cat clv_report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Committer le rapport CLV
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p data/bets
+          git add data/bets/
+          if git diff --staged --quiet; then
+            echo "Rapport CLV inchangé — rien à committer."
+          else
+            git commit -m "bets: rapport CLV $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push
+          fi
