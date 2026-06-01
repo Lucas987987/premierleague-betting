@@ -1,0 +1,101 @@
+name: Ingestion + consolidation (football-data)
+
+# Télécharge les 5 dernières saisons Premier League (code E0) depuis
+# football-data.co.uk vers data/raw/footballdata/ (couche immuable, horodatée,
+# dédupliquée par hash), puis consolide en data/processed/matches.csv en
+# normalisant les noms d'équipes via TeamResolver (config/team_mapping.csv).
+#
+# Aucun secret requis : football-data est en accès libre. The Odds API
+# n'intervient PAS ici (voir le workflow de scoring pour les cotes).
+#
+# Mode non-strict pour la consolidation : si un libellé football-data n'est pas
+# dans team_mapping.csv, le run NE PLANTE PAS — il liste les équipes non
+# résolues dans le résumé du run. On corrige le mapping puis on relance.
+# (Garde-fou anti "match perdu" en mode diagnostic.)
+#
+# Cadence : hebdomadaire (lundi 06h UTC, après le week-end de matchs) +
+# déclenchement manuel. Hors saison, football-data ne bouge pas → dédup, rien
+# à committer.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Lundi 06h UTC (résultats du week-end intégrés).
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ingest-consolidate
+  cancel-in-progress: false
+
+jobs:
+  ingest-consolidate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le repo
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dépendances
+        run: pip install numpy scipy
+
+      - name: Ingestion football-data (5 saisons E0)
+        run: |
+          PYTHONPATH=src python -m ingestion.footballdata > ingest_report.txt 2>&1
+          cat ingest_report.txt
+
+      - name: Consolidation -> matches.csv (non-strict, diagnostic)
+        id: consolidate
+        run: |
+          PYTHONPATH=src python -m consolidation.build_matches > consolidate_report.txt 2>&1
+          status=$?
+          cat consolidate_report.txt
+          # build_matches sort en code != 0 si des équipes ne sont pas résolues.
+          # On capture le statut pour l'afficher dans le résumé, sans faire
+          # échouer brutalement le commit des données déjà ingérées.
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publier les rapports dans le résumé du run
+        if: always()
+        run: |
+          {
+            echo "## Ingestion + consolidation (football-data)"
+            echo ""
+            echo "### Ingestion"
+            echo '```'
+            cat ingest_report.txt 2>/dev/null || echo "(pas de rapport d'ingestion)"
+            echo '```'
+            echo ""
+            echo "### Consolidation"
+            echo '```'
+            cat consolidate_report.txt 2>/dev/null || echo "(pas de rapport de consolidation)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Committer les données mises à jour
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/raw/footballdata/ data/processed/matches.csv
+          if git diff --staged --quiet; then
+            echo "Aucune donnée nouvelle — rien à committer."
+          else
+            git commit -m "data: ingestion+consolidation $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push
+          fi
+
+      - name: Signaler si le mapping est incomplet
+        if: always()
+        run: |
+          if [ "${{ steps.consolidate.outputs.exit_code }}" != "0" ]; then
+            echo "::warning::Consolidation incomplète : des équipes ne sont pas résolues. Voir le résumé du run et compléter config/team_mapping.csv."
+          fi
+
