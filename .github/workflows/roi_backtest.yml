@@ -1,0 +1,62 @@
+name: ROI backtest (walk-forward, filtré par confiance)
+
+# Calcule le ROI qu'aurait donné une stratégie de paris sur l'historique, en
+# walk-forward SANS fuite temporelle (le modèle n'est entraîné que sur le passé
+# strict de chaque date). Parie l'issue de meilleur EV positif, mise fixe 1 unité,
+# aux cotes de CLÔTURE football-data, filtré par plusieurs seuils de score de
+# confiance bayésien.
+#
+# ⚠ LECTURE : on parie à la CLÔTURE => aucun CLV par construction. Le ROI absolu
+# sera probablement neutre/négatif (marge du book). Ce qui est informatif, c'est
+# la TENDANCE selon le seuil de confiance, pas le niveau absolu. Les seuils élevés
+# ont peu de paris (ROI bruité, non significatif).
+#
+# Aucun secret requis. validation/ est à la RACINE, d'où PYTHONPATH=src:.
+#
+# DURÉE : réajuste le modèle bayésien à chaque date d'évaluation (~20-30 min).
+#
+# Cadence : MANUELLE uniquement (analyse ponctuelle).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: roi-backtest
+  cancel-in-progress: false
+
+jobs:
+  roi-backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Récupérer le repo
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dépendances
+        run: pip install numpy scipy
+
+      - name: ROI backtest
+        run: |
+          PYTHONPATH=src:. python -m validation.roi_backtest > roi_report.txt 2>&1
+          cat roi_report.txt
+
+      - name: Publier le rapport dans le résumé du run
+        if: always()
+        run: |
+          {
+            echo "## ROI backtest (walk-forward, filtré par confiance)"
+            echo ""
+            echo "_On parie à la clôture => pas de CLV. Lire la TENDANCE selon le seuil, pas le niveau absolu._"
+            echo ""
+            echo '```'
+            cat roi_report.txt 2>/dev/null || echo "(pas de rapport — le backtest a échoué avant de produire une sortie)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
