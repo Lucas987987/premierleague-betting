@@ -1,0 +1,77 @@
+name: Fit bayésien (Dixon-Coles MAP + Laplace)
+
+# Ajuste le modèle Dixon-Coles bayésien hiérarchique sur tout l'historique joué
+# (data/processed/matches.csv) et écrit dans data/model/ :
+#   - params_bayes.json        : paramètres MAP + sigma (résumé lisible)
+#   - params_bayes_full.json   : paramètres COMPLETS avec covariance (pour le
+#                                scoring : reconstruit les prédictions avec
+#                                intervalles SANS réajuster — découplage fit/predict)
+#   - team_ratings_bayes.csv   : forces avec incertitude + nb de matchs
+#   - sample_predictions_bayes.csv : prédictions d'affiche avec intervalles
+#
+# Découplage fit/predict : ce workflow RÉAJUSTE le modèle. Le scoring (autre
+# workflow) recharge params_bayes_full.json sans réajuster.
+#
+# Aucun secret requis. Le fit prend ~4s pour 27 équipes / 1900 matchs (mesuré),
+# très loin de la limite runner.
+#
+# Cadence : hebdomadaire (lundi 07h UTC, après ingestion+consolidation de 06h)
+# + déclenchement manuel. Les forces d'équipe bougent lentement.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Lundi 07h UTC (après le workflow d'ingestion+consolidation de 06h).
+    - cron: "0 7 * * 1"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fit-bayes
+  cancel-in-progress: false
+
+jobs:
+  fit-bayes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le repo
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dépendances
+        run: pip install numpy scipy
+
+      - name: Fit bayésien
+        run: |
+          PYTHONPATH=src python -m model.fit_bayes > fit_report.txt 2>&1
+          cat fit_report.txt
+
+      - name: Publier le rapport dans le résumé du run
+        if: always()
+        run: |
+          {
+            echo "## Fit bayésien (Dixon-Coles MAP + Laplace)"
+            echo ""
+            echo '```'
+            cat fit_report.txt 2>/dev/null || echo "(pas de rapport — le fit a échoué avant de produire une sortie)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Committer les paramètres du modèle
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/model/
+          if git diff --staged --quiet; then
+            echo "Modèle inchangé — rien à committer."
+          else
+            git commit -m "model: fit bayésien $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push
+          fi
+
