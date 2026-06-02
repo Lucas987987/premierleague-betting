@@ -36,7 +36,7 @@ from urllib.request import Request, urlopen
 
 SPORT_KEY = "soccer_epl"
 REGION = "eu"
-MARKET = "h2h"
+MARKET = "h2h,totals"  # h2h (1/N/2) + totals (over/under). 2 crédits/appel.
 BASE_URL = "https://api.the-odds-api.com/v4"
 
 DEFAULT_RAW_DIR = (
