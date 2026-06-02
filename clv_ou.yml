@@ -1,0 +1,67 @@
+name: CLV Over/Under (Closing Line Value)
+
+# Calcule le CLV des paris OVER/UNDER journalisés (bet_log_ou.csv) : compare la
+# cote du pari (cote précoce) à la clôture du marché. football-data ne cote la
+# clôture que pour le seuil 2.5 (PC>2.5/PC<2.5, repli AvgC). Paris sur les autres
+# seuils → statut 'no_reference' (pas de clôture, on ne calcule pas).
+#
+# À lancer APRÈS que les matchs sont joués et football-data réingéré (clôtures
+# arrivées). Tourne en milieu de semaine, comme le CLV 1/N/2.
+#
+# Journal séparé du 1/N/2 : ce workflow ne touche QUE l'over/under.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Mardi et mercredi à 9h UTC (1h après le CLV 1/N/2, pour éviter les conflits de push).
+    - cron: "0 9 * * 2,3"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clv-ou
+  cancel-in-progress: false
+
+jobs:
+  clv-ou:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le repo
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Calculer le CLV Over/Under
+        run: |
+          PYTHONPATH=src python -m scoring.clv_ou > clv_ou_report.txt 2>&1
+          cat clv_ou_report.txt
+
+      - name: Publier le rapport dans le résumé du run
+        if: always()
+        run: |
+          {
+            echo "## CLV Over/Under (Closing Line Value)"
+            echo ""
+            echo '```'
+            cat clv_ou_report.txt 2>/dev/null || echo "(pas de rapport — échec avant sortie)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Committer le rapport CLV Over/Under
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p data/bets
+          git add data/bets/
+          if git diff --staged --quiet; then
+            echo "Rapport CLV O/U inchangé — rien à committer."
+          else
+            git commit -m "bets: rapport CLV O/U $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push
+          fi
+
