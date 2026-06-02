@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Premier League — Modèle bayésien</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c232c;
+    --line: #2d3640;
+    --ink: #e6edf3;
+    --ink-dim: #8b98a5;
+    --accent: #2ea043;       /* vert */
+    --accent-soft: #2ea04333;
+    --warn: #d29922;
+    --bad: #f85149;
+    --good: #3fb950;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    line-height: 1.5;
+    padding: 0 0 80px;
+    background-image:
+      radial-gradient(circle at 12% -5%, #1b3a2433 0, transparent 45%),
+      radial-gradient(circle at 88% 0%, #15243a44 0, transparent 40%);
+    background-attachment: fixed;
+  }
+  header {
+    border-bottom: 1px solid var(--line);
+    padding: 28px 20px 22px;
+    background: linear-gradient(180deg, #11161dE6, #0d1117E6);
+    position: sticky; top: 0; z-index: 10;
+    backdrop-filter: blur(8px);
+  }
+  h1 {
+    font-family: "Fraunces", serif;
+    font-weight: 900;
+    font-size: 27px;
+    letter-spacing: -0.5px;
+    line-height: 1.05;
+  }
+  h1 .accent { color: var(--accent); }
+  .subtitle { color: var(--ink-dim); font-size: 12px; margin-top: 6px; }
+  main { padding: 22px 14px 0; max-width: 760px; margin: 0 auto; }
+  section { margin-bottom: 38px; }
+  h2 {
+    font-family: "Fraunces", serif;
+    font-weight: 600;
+    font-size: 19px;
+    margin-bottom: 4px;
+    display: flex; align-items: baseline; gap: 9px;
+  }
+  h2 .num {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px; color: var(--accent);
+    border: 1px solid var(--accent); border-radius: 4px;
+    padding: 1px 6px; font-weight: 700;
+  }
+  .sec-note { color: var(--ink-dim); font-size: 11.5px; margin-bottom: 16px; }
+
+  /* Classement des forces */
+  .team-row {
+    display: grid;
+    grid-template-columns: 22px 1fr auto;
+    gap: 10px; align-items: center;
+    padding: 11px 12px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: var(--panel);
+    margin-bottom: 7px;
+    animation: rise .5s cubic-bezier(.2,.7,.3,1) backwards;
+  }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+  .rank { color: var(--ink-dim); font-size: 12px; text-align: right; }
+  .team-name { font-weight: 700; font-size: 14px; }
+  .team-meta { color: var(--ink-dim); font-size: 10.5px; margin-top: 1px; }
+  .net { font-size: 15px; font-weight: 700; text-align: right; }
+  .net.pos { color: var(--good); }
+  .net.neg { color: var(--bad); }
+
+  /* Barre de confiance (intervalle) */
+  .conf-wrap { grid-column: 1 / -1; margin-top: 9px; }
+  .conf-track {
+    position: relative; height: 8px;
+    background: var(--panel-2);
+    border-radius: 5px; overflow: hidden;
+    border: 1px solid var(--line);
+  }
+  .conf-bar {
+    position: absolute; top: 0; bottom: 0;
+    background: linear-gradient(90deg, var(--accent-soft), var(--accent));
+    border-radius: 5px;
+  }
+  .conf-labels {
+    display: flex; justify-content: space-between;
+    font-size: 9.5px; color: var(--ink-dim); margin-top: 4px;
+  }
+  .conf-legend {
+    font-size: 10.5px; color: var(--ink-dim);
+    margin: 4px 2px 18px; padding: 9px 11px;
+    border-left: 2px solid var(--accent);
+    background: var(--panel); border-radius: 0 6px 6px 0;
+  }
+
+  /* Prédictions */
+  .pred {
+    border: 1px solid var(--line); border-radius: 9px;
+    background: var(--panel); padding: 13px 14px; margin-bottom: 9px;
+  }
+  .pred-teams { font-weight: 700; font-size: 14px; margin-bottom: 11px; }
+  .pred-teams .vs { color: var(--ink-dim); font-weight: 400; margin: 0 6px; }
+  .pred-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; margin-bottom: 11px; flex-wrap: wrap;
+  }
+  .pred-head .pred-teams { margin-bottom: 0; }
+  .conf-badge {
+    font-size: 10.5px; font-weight: 700; white-space: nowrap;
+    padding: 3px 9px; border-radius: 20px; border: 1px solid;
+  }
+  .conf-badge.conf-hi  { color: var(--good); border-color: #3fb95066; background: #3fb9501a; }
+  .conf-badge.conf-mid { color: var(--warn); border-color: #d2992266; background: #d299221a; }
+  .conf-badge.conf-lo  { color: var(--bad);  border-color: #f8514966; background: #f851491a; }
+  .interval { color: var(--ink-dim); font-weight: 400; font-size: 10.5px; margin-left: 3px; }
+  .outcome { margin-bottom: 9px; }
+  .outcome:last-child { margin-bottom: 0; }
+  .outcome-head {
+    display: flex; justify-content: space-between;
+    font-size: 11.5px; margin-bottom: 3px;
+  }
+  .outcome-label { color: var(--ink-dim); }
+  .outcome-p { font-weight: 700; }
+  .ci-track {
+    position: relative; height: 6px; background: var(--panel-2);
+    border-radius: 4px; border: 1px solid var(--line); overflow: hidden;
+  }
+  .ci-bar { position: absolute; top:0; bottom:0; background: var(--accent); opacity: .55; }
+  .ci-point { position: absolute; top:-2px; width: 2px; height: 10px; background: var(--ink); }
+
+  .empty {
+    color: var(--ink-dim); font-size: 12.5px; text-align: center;
+    padding: 26px 16px; border: 1px dashed var(--line);
+    border-radius: 9px; background: #0f141a;
+  }
+  .loading { color: var(--ink-dim); font-size: 12px; padding: 14px 2px; }
+  .error {
+    color: var(--bad); font-size: 11.5px; padding: 12px 14px;
+    border: 1px solid #f8514955; border-radius: 8px; background: #f851490d;
+  }
+  footer {
+    text-align: center; color: var(--ink-dim); font-size: 10.5px;
+    padding: 30px 20px 0; line-height: 1.7;
+  }
+  footer code { color: var(--accent); }
+  .refresh-note { font-size: 10px; color: var(--ink-dim); margin-top: 7px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Premier League · <span class="accent">modèle bayésien</span></h1>
+  <div class="subtitle">Dixon-Coles hiérarchique · forces, confiance, valeur</div>
+</header>
+
+<main>
+  <section id="ratings-section">
+    <h2><span class="num">01</span> Forces des équipes</h2>
+    <div class="sec-note">
+      Force nette estimée. La barre mesure la <strong>confiance</strong> : plus elle
+      est étroite, plus le modèle est sûr (beaucoup de matchs). Large = incertain
+      (promu, peu d'historique).
+    </div>
+    <div id="ratings"><div class="loading">Chargement des forces…</div></div>
+  </section>
+
+  <section id="pred-section">
+    <h2><span class="num">02</span> Prédictions d'affiche</h2>
+    <div class="sec-note">
+      Probabilités 1/N/2 avec intervalle de crédibilité (la zone verte = plage
+      plausible, le trait blanc = estimation centrale).
+    </div>
+    <div id="preds"><div class="loading">Chargement des prédictions…</div></div>
+  </section>
+
+  <section id="clv-section">
+    <h2><span class="num">03</span> Suivi CLV</h2>
+    <div class="sec-note">
+      Closing Line Value : le modèle obtient-il de meilleures cotes que la clôture ?
+      Le juge de paix — non significatif avant ~100-200 paris.
+    </div>
+    <div id="clv"><div class="loading">Chargement du CLV…</div></div>
+  </section>
+
+  <section id="predou-section">
+    <h2><span class="num">04</span> Prédictions Over/Under</h2>
+    <p class="sub">Probabilité que le total de buts dépasse chaque seuil, avec intervalle de crédibilité. Sur les mêmes affiches que le 1/N/2.</p>
+    <div id="predsou"><div class="loading">Chargement des totaux…</div></div>
+  </section>
+
+  <section id="clvou-section">
+    <h2><span class="num">05</span> Suivi CLV Over/Under</h2>
+    <p class="sub">CLV des paris over/under — seuil 2.5 uniquement (seul seuil avec clôture football-data). Non significatif avant ~100-200 paris.</p>
+    <div id="clvou"><div class="loading">Chargement du CLV over/under…</div></div>
+  </section>
+</main>
+
+<footer>
+  Données lues en direct depuis le dépôt · mises à jour par les workflows<br>
+  <span class="refresh-note">Rechargez la page pour les dernières valeurs.</span>
+</footer>
+
+<script>
+// Chemins relatifs vers les CSV produits par les workflows (repo public).
+// Le frontend (index.html) est servi par GitHub Pages depuis la racine. Les CSV
+// sont lus via raw.githubusercontent.com (repo public => accès direct, anti-cache).
+const RAW = "https://raw.githubusercontent.com/Lucas987987/premierleague-betting/main/";
+const PATHS = {
+  ratings: RAW + "data/model/team_ratings_bayes.csv",
+  preds:   RAW + "data/model/sample_predictions_bayes.csv",
+  clv:     RAW + "data/bets/clv_report.csv",
+  predsou: RAW + "data/model/sample_predictions_ou.csv",
+  clvou:   RAW + "data/bets/clv_report_ou.csv",
+};
+
+// --- Parseur CSV minimal (gère les virgules simples, pas de guillemets ici) ---
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/).filter(l => l.length);
+  if (!lines.length) return [];
+  const head = lines[0].split(",");
+  return lines.slice(1).map(line => {
+    const cells = line.split(",");
+    const row = {};
+    head.forEach((h, i) => row[h.trim()] = (cells[i] || "").trim());
+    return row;
+  });
+}
+
+async function fetchCSV(path) {
+  // Paramètre anti-cache : raw.githubusercontent.com sert via CDN avec cache.
+  const url = path + "?t=" + Date.now();
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return parseCSV(await res.text());
+}
+
+// --- Section 1 : forces avec barre de confiance ---
+function renderRatings(rows) {
+  const el = document.getElementById("ratings");
+  if (!rows.length) { el.innerHTML = `<div class="empty">Aucune force disponible. Lancez le workflow « Modèle bayésien ».</div>`; return; }
+
+  // L'incertitude affichée = écart-type d'attaque (attack_std). On normalise la
+  // largeur de barre par le max observé, pour une comparaison visuelle relative.
+  const stds = rows.map(r => parseFloat(r.attack_std) || 0);
+  const maxStd = Math.max(...stds, 0.001);
+
+  el.innerHTML = rows.map((r, i) => {
+    const net = parseFloat(r.net) || 0;
+    const std = parseFloat(r.attack_std) || 0;
+    const matches = r.matches || "?";
+    // Largeur de la barre de confiance : proportionnelle à l'incertitude.
+    // Étroit = sûr. On borne entre 12% et 100%.
+    const widthPct = Math.max(12, Math.min(100, (std / maxStd) * 100));
+    // Centrage de la barre (visuel d'intervalle autour du centre).
+    const leftPct = (100 - widthPct) / 2;
+    const netClass = net >= 0 ? "pos" : "neg";
+    const sign = net >= 0 ? "+" : "";
+    return `
+      <div class="team-row" style="animation-delay:${i * 28}ms">
+        <div class="rank">${i + 1}</div>
+        <div>
+          <div class="team-name">${escapeHtml(r.team)}</div>
+          <div class="team-meta">${matches} matchs · incertitude ±${std.toFixed(3)}</div>
+        </div>
+        <div class="net ${netClass}">${sign}${net.toFixed(2)}</div>
+        <div class="conf-wrap">
+          <div class="conf-track">
+            <div class="conf-bar" style="left:${leftPct}%;width:${widthPct}%"></div>
+          </div>
+          <div class="conf-labels"><span>plus sûr</span><span>moins sûr</span></div>
+        </div>
+      </div>`;
+  }).join("") +
+  `<div class="conf-legend">Barre étroite = forte confiance (ex. Man City, beaucoup de
+   matchs). Barre large = faible confiance (promus). C'est l'apport du modèle
+   bayésien : il quantifie ce qu'il ne sait pas.</div>`;
+}
+
+// --- Section 2 : prédictions d'affiche ---
+function renderPreds(rows) {
+  const el = document.getElementById("preds");
+  if (!rows.length) { el.innerHTML = `<div class="empty">Pas de prédictions disponibles pour le moment.</div>`; return; }
+
+  el.innerHTML = rows.map(r => {
+    const outcomes = [
+      { label: "1 · " + escapeHtml(r.home), p: +r.P_home, lo: +r.home_lo, hi: +r.home_hi },
+      { label: "N · nul", p: +r.P_draw, lo: null, hi: null },
+      { label: "2 · " + escapeHtml(r.away), p: +r.P_away, lo: +r.away_lo, hi: +r.away_hi },
+    ];
+
+    // --- Score de confiance du match (0-100) ---
+    // Basé sur la largeur moyenne des intervalles de crédibilité disponibles.
+    // Intervalles serrés => le modèle est sûr => score haut. Large => bas.
+    // MESURE LA CERTITUDE DU MODÈLE, PAS LA VALEUR DU PARI (deux axes distincts).
+    const widths = outcomes
+      .filter(o => o.lo !== null && !isNaN(o.lo))
+      .map(o => o.hi - o.lo);
+    let confidence = null;
+    if (widths.length) {
+      const avgW = widths.reduce((a, b) => a + b, 0) / widths.length;
+      // Rampe : largeur <=0.04 => 100 ; >=0.30 => 0 (cohérent avec la fiabilité du scoring).
+      const FULL = 0.04, ZERO = 0.30;
+      const c = avgW <= FULL ? 1 : avgW >= ZERO ? 0 : (ZERO - avgW) / (ZERO - FULL);
+      confidence = Math.round(c * 100);
+    }
+    const confClass = confidence === null ? "" : confidence >= 70 ? "conf-hi" : confidence >= 40 ? "conf-mid" : "conf-lo";
+    const confBadge = confidence === null ? "" :
+      `<span class="conf-badge ${confClass}">confiance ${confidence}/100</span>`;
+
+    const body = outcomes.map(o => {
+      let ci = "", interval = "";
+      if (o.lo !== null && !isNaN(o.lo)) {
+        const lo = Math.round(o.lo * 100), hi = Math.round(o.hi * 100), p = Math.round(o.p * 100);
+        ci = `<div class="ci-track">
+                <div class="ci-bar" style="left:${lo}%;width:${Math.max(1, hi - lo)}%"></div>
+                <div class="ci-point" style="left:${p}%"></div>
+              </div>`;
+        interval = `<span class="interval">[${lo}–${hi}]</span>`;
+      } else {
+        const p = Math.round(o.p * 100);
+        ci = `<div class="ci-track"><div class="ci-point" style="left:${p}%"></div></div>`;
+      }
+      return `<div class="outcome">
+                <div class="outcome-head">
+                  <span class="outcome-label">${o.label}</span>
+                  <span class="outcome-p">${(o.p * 100).toFixed(0)}% ${interval}</span>
+                </div>${ci}
+              </div>`;
+    }).join("");
+    return `<div class="pred">
+              <div class="pred-head">
+                <div class="pred-teams">${escapeHtml(r.home)}<span class="vs">vs</span>${escapeHtml(r.away)}</div>
+                ${confBadge}
+              </div>
+              ${body}
+            </div>`;
+  }).join("");
+}
+
+// --- Section 3 : CLV ---
+function renderClv(rows) {
+  const el = document.getElementById("clv");
+  const matched = rows.filter(r => r.status === "matched" && r.clv_raw !== "");
+  if (!matched.length) {
+    el.innerHTML = `<div class="empty">Aucun pari évalué pour l'instant.<br>
+      Le CLV se remplira quand des paris auront été journalisés puis joués (saison 2026-27).</div>`;
+    return;
+  }
+  const vals = matched.map(r => parseFloat(r.clv_raw)).filter(v => !isNaN(v));
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const pos = vals.filter(v => v > 0).length;
+  const cls = avg > 0 ? "pos" : "neg";
+  const sign = avg > 0 ? "+" : "";
+  el.innerHTML = `
+    <div class="team-row" style="grid-template-columns:1fr auto">
+      <div><div class="team-name">CLV brut moyen</div>
+        <div class="team-meta">${vals.length} paris évalués · ${pos} battent la clôture</div></div>
+      <div class="net ${cls}">${sign}${(avg * 100).toFixed(2)}%</div>
+    </div>
+    <div class="conf-legend">${vals.length < 100
+      ? `⚠ Échantillon de ${vals.length} paris : trop faible pour conclure. Le CLV n'est fiable qu'à partir de ~100-200 paris.`
+      : `Échantillon de ${vals.length} paris : la tendance commence à être interprétable.`}</div>`;
+}
+
+// --- Section 4 : Prédictions Over/Under (regroupe par match, 4 seuils) ---
+function renderPredsOU(rows) {
+  const el = document.getElementById("predsou");
+  if (!rows.length) { el.innerHTML = `<div class="empty">Pas de prédictions over/under disponibles pour le moment.</div>`; return; }
+
+  // Regroupe les lignes par match (une ligne par seuil dans le CSV).
+  const byMatch = {};
+  rows.forEach(r => {
+    const key = r.home + "|" + r.away;
+    (byMatch[key] = byMatch[key] || { home: r.home, away: r.away, seuils: [] }).seuils.push(r);
+  });
+
+  el.innerHTML = Object.values(byMatch).map(m => {
+    // Tri des seuils par ordre croissant.
+    const seuils = m.seuils.slice().sort((a, b) => (+a.threshold) - (+b.threshold));
+
+    // Score de confiance du match : largeur moyenne des intervalles over sur tous les seuils.
+    const widths = seuils
+      .map(s => (+s.over_hi) - (+s.over_lo))
+      .filter(w => !isNaN(w));
+    let confidence = null;
+    if (widths.length) {
+      const avgW = widths.reduce((a, b) => a + b, 0) / widths.length;
+      const FULL = 0.04, ZERO = 0.30;
+      const c = avgW <= FULL ? 1 : avgW >= ZERO ? 0 : (ZERO - avgW) / (ZERO - FULL);
+      confidence = Math.round(c * 100);
+    }
+    const confClass = confidence === null ? "" : confidence >= 70 ? "conf-hi" : confidence >= 40 ? "conf-mid" : "conf-lo";
+    const confBadge = confidence === null ? "" :
+      `<span class="conf-badge ${confClass}">confiance ${confidence}/100</span>`;
+
+    const body = seuils.map(s => {
+      const po = +s.P_over, lo = Math.round((+s.over_lo) * 100), hi = Math.round((+s.over_hi) * 100), p = Math.round(po * 100);
+      const ci = `<div class="ci-track">
+                    <div class="ci-bar" style="left:${lo}%;width:${Math.max(1, hi - lo)}%"></div>
+                    <div class="ci-point" style="left:${p}%"></div>
+                  </div>`;
+      return `<div class="outcome">
+                <div class="outcome-head">
+                  <span class="outcome-label">Over ${(+s.threshold).toFixed(1)}</span>
+                  <span class="outcome-p">${p}% <span class="interval">[${lo}–${hi}]</span></span>
+                </div>${ci}
+              </div>`;
+    }).join("");
+    return `<div class="pred">
+              <div class="pred-head">
+                <div class="pred-teams">${escapeHtml(m.home)}<span class="vs">vs</span>${escapeHtml(m.away)}</div>
+                ${confBadge}
+              </div>
+              ${body}
+            </div>`;
+  }).join("");
+}
+
+// --- Section 5 : CLV Over/Under ---
+function renderClvOU(rows) {
+  const el = document.getElementById("clvou");
+  const matched = rows.filter(r => r.status === "matched" && r.clv_raw !== "");
+  if (!matched.length) {
+    el.innerHTML = `<div class="empty">Aucun pari over/under évalué pour l'instant.<br>
+      Le CLV se remplira quand des paris auront été journalisés puis joués (saison 2026-27).</div>`;
+    return;
+  }
+  const vals = matched.map(r => parseFloat(r.clv_raw)).filter(v => !isNaN(v));
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const pos = vals.filter(v => v > 0).length;
+  const cls = avg > 0 ? "pos" : "neg";
+  const sign = avg > 0 ? "+" : "";
+  el.innerHTML = `
+    <div class="team-row" style="grid-template-columns:1fr auto">
+      <div><div class="team-name">CLV brut moyen (over/under 2.5)</div>
+        <div class="team-meta">${vals.length} paris évalués · ${pos} battent la clôture</div></div>
+      <div class="net ${cls}">${sign}${(avg * 100).toFixed(2)}%</div>
+    </div>
+    <div class="conf-legend">${vals.length < 100
+      ? `⚠ Échantillon de ${vals.length} paris : trop faible pour conclure. Le CLV n'est fiable qu'à partir de ~100-200 paris.`
+      : `Échantillon de ${vals.length} paris : la tendance commence à être interprétable.`}</div>`;
+}
+
+function escapeHtml(s) {
+  return (s || "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+}
+
+async function loadSection(path, renderFn, elId) {
+  try {
+    renderFn(await fetchCSV(path));
+  } catch (e) {
+    document.getElementById(elId).innerHTML =
+      `<div class="error">Impossible de charger les données (${escapeHtml(e.message)}).<br>
+       Le fichier n'existe peut-être pas encore — lancez le workflow correspondant.</div>`;
+  }
+}
+
+// Chargement indépendant de chaque section (une section qui échoue n'empêche pas les autres).
+loadSection(PATHS.ratings, renderRatings, "ratings");
+loadSection(PATHS.preds, renderPreds, "preds");
+loadSection(PATHS.clv, renderClv, "clv");
+loadSection(PATHS.predsou, renderPredsOU, "predsou");
+loadSection(PATHS.clvou, renderClvOU, "clvou");
+</script>
+</body>
+</html>
