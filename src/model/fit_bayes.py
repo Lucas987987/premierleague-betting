@@ -2,23 +2,18 @@
 
 Ajuste le Dixon-Coles hiérarchique sur tout l'historique joué et écrit :
   - data/model/params_bayes.json     : paramètres MAP + sigma estimés
+  - data/model/params_bayes_full.json : paramètres complets (covariance) pour le scoring
   - data/model/team_ratings_bayes.csv : forces AVEC incertitude (écart-type)
   - data/model/sample_predictions_bayes.csv : prédictions 1/N/2 + intervalles
-
-But de cette étape : vérifier que le bayésien tourne, que les sigma hiérarchiques
-sont sensés, et surtout que les intervalles de crédibilité reflètent le volume de
-données (promus = intervalles larges). La validation walk-forward viendra ensuite.
+  - data/model/sample_predictions_ou.csv : prédictions over/under + intervalles
 """
-
 from __future__ import annotations
-
 import csv
 import json
 from pathlib import Path
-
 import numpy as np
-
 from model.dixoncoles_bayes import BayesParams, fit_bayes, predict_1x2_bayes
+from scoring.totals import predict_over_under, THRESHOLDS
 
 _ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MATCHES = _ROOT / "data" / "processed" / "matches.csv"
@@ -48,8 +43,6 @@ def load_played(path: Path):
 
 
 def _param_std(params: BayesParams):
-    """Écart-type de chaque attaque/défense, depuis la covariance de Laplace.
-    Pour les n-1 premières équipes (paramètres libres) ; la dernière est dérivée."""
     lay = params._layout
     diag = np.sqrt(np.clip(np.diag(params.cov_matrix), 0, None))
     n = len(params.teams)
@@ -57,7 +50,6 @@ def _param_std(params: BayesParams):
     def_std = np.zeros(n)
     att_std[: n - 1] = diag[lay["att"]]
     def_std[: n - 1] = diag[lay["def"]]
-    # Dernière équipe = -somme : son incertitude ~ somme quadratique (approx).
     att_std[n - 1] = np.sqrt(np.sum(diag[lay["att"]] ** 2))
     def_std[n - 1] = np.sqrt(np.sum(diag[lay["def"]] ** 2))
     return att_std, def_std
@@ -77,7 +69,6 @@ def run(matches_path: Path = DEFAULT_MATCHES, model_dir: Path = DEFAULT_MODEL_DI
 
     model_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Paramètres (résumé lisible).
     (model_dir / "params_bayes.json").write_text(
         json.dumps({
             "teams": params.teams,
@@ -90,23 +81,17 @@ def run(matches_path: Path = DEFAULT_MATCHES, model_dir: Path = DEFAULT_MODEL_DI
         encoding="utf-8",
     )
 
-    # 1b. Paramètres COMPLETS (avec covariance) pour le scoring : permet de
-    # reconstruire les prédictions avec intervalles sans réajuster (découplage
-    # fit/predict, cf. ARCHITECTURE.md).
     (model_dir / "params_bayes_full.json").write_text(
         json.dumps(params.to_dict(), ensure_ascii=False),
         encoding="utf-8",
     )
 
-    # 2. Forces avec incertitude + nombre de matchs (pour voir le lien).
     att_std, def_std = _param_std(params)
     ratings = sorted(
         range(len(params.teams)),
         key=lambda k: -(params.attack[k] + params.defence[k]),
     )
-    with (model_dir / "team_ratings_bayes.csv").open(
-        "w", newline="", encoding="utf-8"
-    ) as fh:
+    with (model_dir / "team_ratings_bayes.csv").open("w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(["team", "matches", "attack", "attack_std",
                     "defence", "defence_std", "net"])
@@ -119,13 +104,11 @@ def run(matches_path: Path = DEFAULT_MATCHES, model_dir: Path = DEFAULT_MODEL_DI
                 f"{params.attack[k] + params.defence[k]:.4f}",
             ])
 
-    # 3. Prédictions d'affiche AVEC intervalles.
+    # 3. Prédictions d'affiche 1/N/2 AVEC intervalles.
     top = [params.teams[k] for k in ratings[:2]]
     bottom = [params.teams[k] for k in ratings[-2:]]
     pairs = [(top[0], top[1]), (top[0], bottom[0]), (bottom[0], top[0])]
-    with (model_dir / "sample_predictions_bayes.csv").open(
-        "w", newline="", encoding="utf-8"
-    ) as fh:
+    with (model_dir / "sample_predictions_bayes.csv").open("w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(["home", "away", "P_home", "home_lo", "home_hi",
                     "P_draw", "P_away", "away_lo", "away_hi"])
@@ -138,7 +121,22 @@ def run(matches_path: Path = DEFAULT_MATCHES, model_dir: Path = DEFAULT_MODEL_DI
                 f"{pr['away_ci']['lo']:.3f}", f"{pr['away_ci']['hi']:.3f}",
             ])
 
-    # Aperçu : top 5 + les équipes à plus faible historique.
+    # 3b. Prédictions d'affiche OVER/UNDER AVEC intervalles (mêmes paires).
+    # Une ligne par (match, seuil) ; over+under=1, on stocke l'over et son intervalle.
+    with (model_dir / "sample_predictions_ou.csv").open("w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(["home", "away", "threshold",
+                    "P_over", "over_lo", "over_hi", "P_under"])
+        for h, a in pairs:
+            ou = predict_over_under(params, h, a, n_samples=400)
+            for s in THRESHOLDS:
+                d = ou[s]
+                w.writerow([
+                    h, a, s,
+                    f"{d['over']:.3f}", f"{d['over_ci']['lo']:.3f}", f"{d['over_ci']['hi']:.3f}",
+                    f"{d['under']:.3f}",
+                ])
+
     print("\nTop 5 forces (avec écart-type d'attaque) :")
     for k in ratings[:5]:
         t = params.teams[k]
@@ -151,8 +149,8 @@ def run(matches_path: Path = DEFAULT_MATCHES, model_dir: Path = DEFAULT_MODEL_DI
         k = params.index(t)
         print(f"   {t:<16} matchs={counts.get(t,0):>3}  att_std={att_std[k]:.3f}")
 
-    print("\nÉcrit : params_bayes.json, team_ratings_bayes.csv, "
-          "sample_predictions_bayes.csv")
+    print("\nÉcrit : params_bayes.json, params_bayes_full.json, team_ratings_bayes.csv, "
+          "sample_predictions_bayes.csv, sample_predictions_ou.csv")
     return params
 
 
