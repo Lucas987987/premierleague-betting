@@ -1,0 +1,70 @@
+name: Validation Over/Under (walk-forward)
+
+# Valide la calibration des probas Over/Under du modèle, SEUIL PAR SEUIL, en
+# walk-forward sans fuite (critère ECE pondéré par effectif). Compare au marché
+# sur le seuil 2.5 (pré-match P>2.5/P<2.5, repli Avg).
+#
+# Analyse ponctuelle : ne produit pas de pari, écrit un rapport de calibration
+# (validation/calibration_ou.csv) et l'affiche dans le résumé du run.
+#
+# validation/ est à la RACINE, d'où PYTHONPATH=src:.
+# DURÉE : réajuste le modèle de base à chaque date (~quelques minutes).
+#
+# Cadence : MANUELLE uniquement.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: validate-ou
+  cancel-in-progress: false
+
+jobs:
+  validate-ou:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Récupérer le repo
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dépendances
+        run: pip install numpy scipy
+
+      - name: Valider la calibration Over/Under
+        run: |
+          PYTHONPATH=src:. python -m validation.walkforward_ou > validation_ou_report.txt 2>&1
+          cat validation_ou_report.txt
+
+      - name: Publier le rapport dans le résumé du run
+        if: always()
+        run: |
+          {
+            echo "## Validation Over/Under (walk-forward)"
+            echo ""
+            echo '```'
+            cat validation_ou_report.txt 2>/dev/null || echo "(pas de rapport — échec avant sortie)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Committer le rapport de calibration
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p validation
+          git add validation/calibration_ou.csv
+          if git diff --staged --quiet; then
+            echo "Rapport de calibration inchangé — rien à committer."
+          else
+            git commit -m "validation: calibration O/U $(date -u +%Y-%m-%dT%H:%MZ)"
+            git push
+          fi
+
