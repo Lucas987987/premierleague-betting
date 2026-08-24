@@ -1,13 +1,13 @@
 home,away,threshold,P_over,over_lo,over_hi,P_under
-Man City,Arsenal,0.5,0.939,0.921,0.956,0.061
-Man City,Arsenal,1.5,0.783,0.737,0.827,0.217
-Man City,Arsenal,2.5,0.546,0.482,0.613,0.454
-Man City,Arsenal,3.5,0.322,0.264,0.390,0.678
+Man City,Arsenal,0.5,0.939,0.921,0.955,0.061
+Man City,Arsenal,1.5,0.783,0.736,0.827,0.217
+Man City,Arsenal,2.5,0.546,0.480,0.612,0.454
+Man City,Arsenal,3.5,0.322,0.262,0.388,0.678
 Man City,Sheffield United,0.5,0.990,0.980,0.996,0.010
-Man City,Sheffield United,1.5,0.947,0.908,0.974,0.053
+Man City,Sheffield United,1.5,0.947,0.908,0.973,0.053
 Man City,Sheffield United,2.5,0.842,0.756,0.911,0.158
 Man City,Sheffield United,3.5,0.682,0.559,0.796,0.318
-Sheffield United,Man City,0.5,0.982,0.970,0.991,0.018
-Sheffield United,Man City,1.5,0.917,0.872,0.955,0.083
-Sheffield United,Man City,2.5,0.777,0.692,0.860,0.223
-Sheffield United,Man City,3.5,0.587,0.478,0.710,0.413
+Sheffield United,Man City,0.5,0.982,0.969,0.991,0.018
+Sheffield United,Man City,1.5,0.917,0.872,0.954,0.083
+Sheffield United,Man City,2.5,0.777,0.692,0.859,0.223
+Sheffield United,Man City,3.5,0.587,0.478,0.708,0.413
