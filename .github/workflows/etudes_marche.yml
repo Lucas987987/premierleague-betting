@@ -1,0 +1,40 @@
+name: Études de marché (hypothèses gelées)
+
+# Évalue validation/etudes/frozen_hypotheses.json. Hors prod, manuel uniquement.
+# Le bloc OOS ne doit être lancé qu'UNE fois par version du gel.
+
+on:
+  workflow_dispatch:
+    inputs:
+      bloc:
+        description: "IS (exploration) ou OOS (confirmatoire, une seule fois)"
+        required: true
+        default: "IS"
+        type: choice
+        options: [IS, OOS]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: etudes-marche
+  cancel-in-progress: false
+
+jobs:
+  etudes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pandas numpy
+      - name: Lancer les études
+        run: python validation/etudes/etudes_marche.py --bloc ${{ inputs.bloc }} | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Committer le résultat
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/validation/etudes_${{ inputs.bloc }}.csv
+          git diff --cached --quiet || git commit -m "Études marché : bloc ${{ inputs.bloc }}"
+          git push
