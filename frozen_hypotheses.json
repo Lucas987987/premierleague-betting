@@ -1,0 +1,120 @@
+{
+  "_doc": "Hypothèses de structure de marché Premier League, gelées AVANT toute mesure (transposition des études tennis). Règle : on ne modifie JAMAIS une hypothèse, un seuil ou un critère après la date de gel. Une hypothèse corrigée = nouvelle entrée avec nouvelle date de gel. Exploration sur IS uniquement ; OOS évalué une fois, correction de Holm sur la famille des tests OOS.",
+  "date_gel": "2026-10-06",
+  "source": "football-data.co.uk E0 (data/processed/matches.csv)",
+  "decoupage": {
+    "IS": [
+      "2122",
+      "2223"
+    ],
+    "OOS": [
+      "2324",
+      "2425",
+      "2526"
+    ]
+  },
+  "avertissement_donnees": "Les colonnes 'ouverture' football-data (PSH, B365H...) sont relevées le vendredi après-midi (mardi pour le milieu de semaine), pas à la vraie ouverture. Les colonnes 'C' sont relevées au coup d'envoi.",
+  "alpha": 0.05,
+  "bootstrap": 5000,
+  "hypotheses": [
+    {
+      "id": "M1",
+      "analogue_tennis": "O2 / closure says everything",
+      "enonce": "La clôture Pinnacle dévigorisée est calibrée sur le 1X2.",
+      "mesure": "ECE (10 bins, 3 issues empilées) et log-loss clôture vs ouverture.",
+      "critere": "ECE_cloture < 0.02 ET log-loss clôture < log-loss ouverture.",
+      "type": "descriptif"
+    },
+    {
+      "id": "M2",
+      "analogue_tennis": "O1 (ouverture penche vers les favoris)",
+      "enonce": "La ligne Pinnacle du vendredi est biaisée en direction des favoris : entre ouverture et clôture, la proba du favori baisse en moyenne.",
+      "mesure": "moyenne(p_fav_close - p_fav_open), favori = issue la plus probable à l'ouverture.",
+      "critere": "IC95 bootstrap entièrement < 0.",
+      "type": "test"
+    },
+    {
+      "id": "M3",
+      "analogue_tennis": "margin_dynamics (marges soft = taxe fixe)",
+      "enonce": "La marge bet365 ne se compresse pas entre ouverture et clôture, alors que celle de Pinnacle se compresse.",
+      "mesure": "médiane(marge_close - marge_open) par book.",
+      "critere": "B365 : |médiane| < 0.005 ; Pinnacle : IC95 de la moyenne < 0.",
+      "type": "test"
+    },
+    {
+      "id": "M4",
+      "analogue_tennis": "nul sous-joué (ARCHITECTURE §6)",
+      "enonce": "Le nul porte une prime de sélection plus élevée que 1 et 2 : la meilleure cote de clôture (hors exchange, parmi B365/BW/IW/WH/VC) dépasse plus souvent la cote juste Pinnacle sur le nul.",
+      "mesure": "EV_best = max_cote_soft_close × p_fair_pinnacle_close − 1, moyenne par issue.",
+      "critere": "moyenne EV_best(nul) − moyenne(EV_best(1), EV_best(2)) : IC95 > 0.",
+      "type": "test"
+    },
+    {
+      "id": "M5",
+      "analogue_tennis": "latence par book (bet365 en retard de 169 min)",
+      "enonce": "Quand Pinnacle bouge fort (|Δp| ≥ 0.03 sur une issue entre ouverture et clôture), bet365 à la clôture reste en retard : la cote B365 de clôture sur l'issue raccourcie par Pinnacle a un EV positif contre la juste Pinnacle de clôture plus souvent que hors gros mouvement.",
+      "mesure": "EV = B365C × p_fair_PSC − 1 sur l'issue raccourcie ; comparaison à l'ensemble des issues.",
+      "critere": "moyenne EV (gros mouvements) − moyenne EV (toutes issues) : IC95 > 0. ROI réalisé reporté, non décisionnel.",
+      "type": "test"
+    },
+    {
+      "id": "M6",
+      "analogue_tennis": "gros-move résiduel (seul signal candidat survivant)",
+      "enonce": "Après un gros mouvement Pinnacle (Δp ≥ +0.03 sur une issue), la clôture sous-réagit encore : fréquence observée > proba de clôture.",
+      "mesure": "moyenne(résultat − p_fair_close) sur les issues raccourcies de ≥ 3 pts.",
+      "critere": "IC95 bootstrap > 0.",
+      "type": "test"
+    },
+    {
+      "id": "M7",
+      "analogue_tennis": "favorite-longshot",
+      "enonce": "Les outsiders (p_fair_close < 0.20) gagnent moins souvent que leur proba de clôture.",
+      "mesure": "moyenne(résultat − p_fair_close) sur les issues p < 0.20.",
+      "critere": "IC95 bootstrap < 0.",
+      "type": "test"
+    }
+  ],
+  "hypotheses_forward": {
+    "_doc": "Gelées le 2026-10-06, mesurables uniquement sur la capture dense à venir (The Odds API). Aucune conclusion avant n≥30 événements distincts par hypothèse ; aucune mise tant que le ROI n'est pas démontré en plus du CLV.",
+    "books_cibles": [
+      "winamax_fr",
+      "betclic_fr",
+      "unibet_fr",
+      "pmu_fr"
+    ],
+    "liste": [
+      {
+        "id": "F1",
+        "analogue_tennis": "latence par book (bet365 169 min vs 888 4 min)",
+        "enonce": "Après un mouvement Pinnacle ≥ 3 pts de proba sur une issue, chaque book FR met un temps médian mesurable à suivre (≥ 50 % du mouvement).",
+        "mesure": "délai médian détection Pinnacle → book FR, par book.",
+        "critere": "descriptif ; classement des books par latence."
+      },
+      {
+        "id": "F2",
+        "analogue_tennis": "H17/H18 (prix d'entrée vs Pinnacle)",
+        "enonce": "Une cote FR restée au-dessus de la cote juste Pinnacle au moment de la détection (EV_detection > 0) bat la clôture Pinnacle.",
+        "mesure": "CLV dévigorisé vs clôture Pinnacle ET ROI réalisé, sur les entrées EV_detection > 0 au prix FR, mesuré au prix de détection (jamais au prix de clôture).",
+        "critere": "IC95 bootstrap du CLV > 0 avec n ≥ 30 ; ROI rapporté séparément, conclusion de mise seulement si ROI > 0 après n ≥ 100."
+      },
+      {
+        "id": "F3",
+        "analogue_tennis": "M4 historique",
+        "enonce": "La prime de sélection du nul (M4) se retrouve chez les books FR.",
+        "mesure": "EV_best FR sur le nul − moyenne EV_best FR sur 1 et 2.",
+        "critere": "IC95 > 0 avec n ≥ 30 matchs."
+      }
+    ]
+  },
+  "replication": "Hypothèses M1-M7 et F1-F3 reprises À L'IDENTIQUE du gel Ligue 1 du 2026-10-06 (aucun seuil modifié après les résultats Ligue 1). Données Premier League jamais examinées avant ce gel : réplication pré-enregistrée.",
+  "hypotheses_nouvelles": [
+    {
+      "id": "M6-R",
+      "date_gel": "2026-10-06",
+      "origine": "M6 OOS Premier League : résidu +5,9 % [−0,3 ; +11,9], p brut 0,029, non confirmé après Holm (0,145). Repéré a posteriori : ne compte qu'après test sur données nouvelles.",
+      "enonce": "Identique à M6 (issue raccourcie de ≥ 3 pts de proba entre ouverture et clôture Pinnacle : fréquence observée > p_fair_close).",
+      "donnees": "Saison 26/27 Premier League uniquement (jamais examinée), évaluée une seule fois en fin de saison ou dès n ≥ 200 issues.",
+      "critere": "IC95 bootstrap (par match) > 0, test unique, pas de Holm. ROI rapporté, non décisionnel."
+    }
+  ]
+}
